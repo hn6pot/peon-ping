@@ -93,7 +93,7 @@ for cat in m.get('categories', {}).values():
             seen.add(f)
             print(f)
 " | while read -r sfile; do
-      curl -fsSL "$REPO_BASE/packs/$pack/sounds/$sfile" -o "$INSTALL_DIR/packs/$pack/sounds/$sfile"
+      curl -fsSL "$REPO_BASE/packs/$pack/sounds/$sfile" -o "$INSTALL_DIR/packs/$pack/sounds/$sfile" </dev/null
     done
   done
   if [ "$UPDATING" = false ]; then
