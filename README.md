@@ -81,9 +81,11 @@ Edit `~/.claude/hooks/peon-ping/config.json`:
 | Pack | Character | Sounds | By |
 |---|---|---|---|
 | `peon` (default) | Orc Peon (Warcraft III) | "Ready to work?", "Work, work.", "Okie dokie." | [@tonyyont](https://github.com/tonyyont) |
+| `peon_es` | Peon Orco (Warcraft III, Spanish) | "¿Qué quieres?", "Trabajo, trabajo.", "Okay makey." | [@Keralin](https://github.com/Keralin) |
 | `peon_fr` | Orc Peon (Warcraft III, French) | "Prêt à travailler?", "Travail, travail.", "D'accord." | [@thomasKn](https://github.com/thomasKn) |
 | `peon_pl` | Orc Peon (Warcraft III, Polish) | Polish voice lines | [@askowronski](https://github.com/askowronski) |
 | `peasant` | Human Peasant (Warcraft III) | "Yes, milord?", "Job's done!", "Ready, sir." | [@thomasKn](https://github.com/thomasKn) |
+| `peasant_es` | Campesino Humano (Warcraft III, Spanish) | "¿Sí, mi lord?", "¡A trabajar!", "Siiii, mi señor." | [@Keralin](https://github.com/Keralin) |
 | `peasant_fr` | Human Peasant (Warcraft III, French) | "Oui, monseigneur?", "C'est fait!", "Prêt, monsieur." | [@thomasKn](https://github.com/thomasKn) |
 | `ra2_soviet_engineer` | Soviet Engineer (Red Alert 2) | "Tools ready", "Yes, commander", "Engineering" | [@msukkari](https://github.com/msukkari) |
 | `sc_battlecruiser` | Battlecruiser (StarCraft) | "Battlecruiser operational", "Make it happen", "Engage" | [@garysheng](https://github.com/garysheng) |
