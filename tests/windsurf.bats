@@ -1,0 +1,138 @@
+#!/usr/bin/env bats
+
+load setup.bash
+
+setup() {
+  setup_test_env
+
+  # Derive repo root from PEON_SH (set by setup.bash using its own BASH_SOURCE)
+  WINDSURF_SH="${PEON_SH%/peon.sh}/adapters/windsurf.sh"
+
+  # Adapter resolves peon.sh via CLAUDE_PEON_DIR — symlink it into the test dir
+  ln -sf "$PEON_SH" "$TEST_DIR/peon.sh"
+}
+
+teardown() {
+  teardown_test_env
+}
+
+# Helper: run windsurf adapter with an event name argument
+# Windsurf passes event name as $1 and JSON on stdin (which the adapter drains)
+run_windsurf() {
+  local event="$1"
+  export PEON_TEST=1
+  echo '{}' | bash "$WINDSURF_SH" "$event" 2>"$TEST_DIR/stderr.log"
+  WINDSURF_EXIT=$?
+  WINDSURF_STDERR=$(cat "$TEST_DIR/stderr.log" 2>/dev/null)
+  # On macOS peon.sh runs afplay via nohup & (background); wait for mock to finish
+  sleep 0.3
+}
+
+# ============================================================
+# Event mapping
+# ============================================================
+
+@test "post_cascade_response maps to Stop and plays completion sound" {
+  run_windsurf post_cascade_response
+  [ "$WINDSURF_EXIT" -eq 0 ]
+  afplay_was_called
+  sound=$(afplay_sound)
+  [[ "$sound" == *"/packs/peon/sounds/Done"* ]]
+}
+
+@test "post_write_code maps to Stop and plays completion sound" {
+  run_windsurf post_write_code
+  [ "$WINDSURF_EXIT" -eq 0 ]
+  afplay_was_called
+  sound=$(afplay_sound)
+  [[ "$sound" == *"/packs/peon/sounds/Done"* ]]
+}
+
+@test "post_run_command maps to Stop and plays completion sound" {
+  run_windsurf post_run_command
+  [ "$WINDSURF_EXIT" -eq 0 ]
+  afplay_was_called
+  sound=$(afplay_sound)
+  [[ "$sound" == *"/packs/peon/sounds/Done"* ]]
+}
+
+@test "pre_user_prompt maps to UserPromptSubmit" {
+  run_windsurf pre_user_prompt
+  [ "$WINDSURF_EXIT" -eq 0 ]
+  # UserPromptSubmit does not play sound normally (only on spam)
+  ! afplay_was_called
+}
+
+# ============================================================
+# Skipped events
+# ============================================================
+
+@test "unknown event exits gracefully without sound" {
+  run_windsurf some_future_event
+  [ "$WINDSURF_EXIT" -eq 0 ]
+  ! afplay_was_called
+}
+
+# ============================================================
+# Config passthrough
+# ============================================================
+
+@test "paused state suppresses Windsurf sounds" {
+  touch "$TEST_DIR/.paused"
+  run_windsurf post_cascade_response
+  [ "$WINDSURF_EXIT" -eq 0 ]
+  ! afplay_was_called
+}
+
+@test "enabled=false suppresses Windsurf sounds" {
+  cat > "$TEST_DIR/config.json" <<'JSON'
+{ "enabled": false, "active_pack": "peon", "volume": 0.5, "categories": {} }
+JSON
+  run_windsurf post_cascade_response
+  [ "$WINDSURF_EXIT" -eq 0 ]
+  ! afplay_was_called
+}
+
+@test "volume from config is passed through" {
+  cat > "$TEST_DIR/config.json" <<'JSON'
+{ "active_pack": "peon", "volume": 0.3, "enabled": true, "categories": {} }
+JSON
+  run_windsurf post_cascade_response
+  afplay_was_called
+  log_line=$(tail -1 "$TEST_DIR/afplay.log")
+  [[ "$log_line" == *"-v 0.3"* ]]
+}
+
+# ============================================================
+# Spam detection
+# ============================================================
+
+@test "rapid Windsurf prompts trigger annoyed sound" {
+  # Each adapter invocation gets a unique $$ (PID) as session_id.
+  # To test spam detection, call peon.sh directly with a fixed session_id
+  # (same approach the adapter would produce if Windsurf reused a process).
+  export PEON_TEST=1
+  for i in $(seq 1 3); do
+    echo '{"hook_event_name":"UserPromptSubmit","notification_type":"","cwd":"/tmp/t","session_id":"windsurf-fixed","permission_mode":""}' \
+      | bash "$PEON_SH" 2>/dev/null
+    sleep 0.3
+  done
+  afplay_was_called
+  sound=$(afplay_sound)
+  [[ "$sound" == *"Angry1.wav" ]]
+}
+
+# ============================================================
+# Default argument
+# ============================================================
+
+@test "no argument defaults to post_cascade_response (Stop)" {
+  export PEON_TEST=1
+  echo '{}' | bash "$WINDSURF_SH" 2>"$TEST_DIR/stderr.log"
+  WINDSURF_EXIT=$?
+  sleep 0.3
+  [ "$WINDSURF_EXIT" -eq 0 ]
+  afplay_was_called
+  sound=$(afplay_sound)
+  [[ "$sound" == *"/packs/peon/sounds/Done"* ]]
+}
