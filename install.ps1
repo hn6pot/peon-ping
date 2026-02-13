@@ -4,7 +4,7 @@
 # Made by https://github.com/SpamsRevenge in https://github.com/PeonPing/peon-ping/issues/94
 
 param(
-    [string]$Pack = "peon",
+    [string]$Packs = "",
     [switch]$All
 )
 
@@ -47,18 +47,18 @@ try {
 
 # --- Decide which packs to download ---
 $packsToInstall = @()
-if ($All) {
+if ($Packs) {
+    # Custom pack list (comma-separated)
+    $customPackNames = $Packs -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+    $packsToInstall = $registry.packs | Where-Object { $_.name -in $customPackNames }
+    Write-Host "  Installing custom packs: $($customPackNames -join ', ')" -ForegroundColor Cyan
+} elseif ($All) {
     $packsToInstall = $registry.packs
     Write-Host "  Installing ALL $($packsToInstall.Count) packs..." -ForegroundColor Cyan
 } else {
     # Default: install a curated set of popular packs
     $defaultPacks = @("peon", "peasant", "sc_battlecruiser", "sc_kerrigan", "ra2_soviet_engineer", "tf2_engineer", "glados")
     $packsToInstall = $registry.packs | Where-Object { $_.name -in $defaultPacks }
-    # Always include the selected pack
-    if ($Pack -and $Pack -notin $defaultPacks) {
-        $extra = $registry.packs | Where-Object { $_.name -eq $Pack }
-        if ($extra) { $packsToInstall += $extra }
-    }
     Write-Host "  Installing $($packsToInstall.Count) packs (use -All for all $($registry.packs.Count))..." -ForegroundColor Cyan
 }
 
@@ -137,8 +137,11 @@ Write-Host "  Total: $totalSounds sounds across $($packsToInstall.Count - $faile
 # --- Install config ---
 $configPath = Join-Path $InstallDir "config.json"
 if (-not $Updating) {
+    # Set active pack to first installed pack
+    $firstPack = if ($packsToInstall.Count -gt 0) { $packsToInstall[0].name } else { "peon" }
+
     $config = @{
-        active_pack = $Pack
+        active_pack = $firstPack
         volume = 0.5
         enabled = $true
         desktop_notifications = $true
@@ -576,11 +579,9 @@ if (Test-Path $scriptsSourceDir) {
 Write-Host ""
 Write-Host "Testing sound..."
 
-$testPack = if (-not $Updating) { $Pack } else {
-    try {
-        (Get-Content $configPath -Raw | ConvertFrom-Json).active_pack
-    } catch { "peon" }
-}
+$testPack = try {
+    (Get-Content $configPath -Raw | ConvertFrom-Json).active_pack
+} catch { "peon" }
 
 $testPackDir = Join-Path $InstallDir "packs\$testPack\sounds"
 $testSound = Get-ChildItem -Path $testPackDir -File -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -609,7 +610,8 @@ if ($Updating) {
 } else {
     Write-Host "=== peon-ping installed! ===" -ForegroundColor Green
     Write-Host ""
-    Write-Host "  Active pack: $Pack" -ForegroundColor Cyan
+    $activePack = try { (Get-Content $configPath -Raw | ConvertFrom-Json).active_pack } catch { "peon" }
+    Write-Host "  Active pack: $activePack" -ForegroundColor Cyan
     Write-Host "  Volume: 0.5" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "  Commands (open a new terminal first):" -ForegroundColor White
@@ -623,6 +625,7 @@ if ($Updating) {
     Write-Host ""
     Write-Host "  Start Claude Code and you'll hear: `"Ready to work?`"" -ForegroundColor Yellow
     Write-Host ""
+    Write-Host "  To install specific packs: .\install.ps1 -Packs peon,glados,peasant" -ForegroundColor DarkGray
     Write-Host "  To install ALL packs: .\install.ps1 -All" -ForegroundColor DarkGray
     Write-Host "  To uninstall: powershell -ExecutionPolicy Bypass -File `"$InstallDir\uninstall.ps1`"" -ForegroundColor DarkGray
 }
