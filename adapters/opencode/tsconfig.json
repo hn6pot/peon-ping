@@ -9,5 +9,5 @@
     "noEmit": true,
     "types": ["vitest/globals"]
   },
-  "include": ["adapters/opencode/**/*.ts", "tests/**/*.ts"]
+  "include": ["**/*.ts", "../../tests/**/*.ts"]
 }

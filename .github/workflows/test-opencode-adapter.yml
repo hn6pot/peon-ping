@@ -5,11 +5,13 @@ on:
     branches: [main]
     paths:
       - 'adapters/opencode/**'
+      - 'tests/peon-ping-internals.test.ts'
       - '.github/workflows/test-opencode-adapter.yml'
   push:
     branches: [main]
     paths:
       - 'adapters/opencode/**'
+      - 'tests/peon-ping-internals.test.ts'
       - '.github/workflows/test-opencode-adapter.yml'
 
 jobs:
