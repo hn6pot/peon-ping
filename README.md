@@ -29,7 +29,7 @@ curl -fsSL https://raw.githubusercontent.com/PeonPing/peon-ping/main/install.sh 
 ### Option 3: Installer for windows
 
 ```powershell
-Invoke-WebRequest -Uri "https://raw.githubusercontent.com/tonyyont/peon-ping/main/install.ps1" -UseBasicParsing | Invoke-Expression
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/PeonPing/peon-ping/main/install.ps1" -UseBasicParsing | Invoke-Expression
 ```
 
 

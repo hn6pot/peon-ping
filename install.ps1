@@ -1,6 +1,7 @@
 # peon-ping Windows Installer
 # Native Windows port - plays Warcraft III Peon sounds when Claude Code needs attention
 # Usage: powershell -ExecutionPolicy Bypass -File install.ps1
+# Made by https://github.com/SpamsRevenge in https://github.com/PeonPing/peon-ping/issues/94
 
 param(
     [string]$Pack = "peon",
@@ -140,16 +141,21 @@ if (-not $Updating) {
         active_pack = $Pack
         volume = 0.5
         enabled = $true
+        desktop_notifications = $true
         categories = @{
-            greeting = $true
-            acknowledge = $true
-            complete = $true
-            error = $true
-            permission = $true
-            annoyed = $true
+            "session.start" = $true
+            "task.acknowledge" = $true
+            "task.complete" = $true
+            "task.error" = $true
+            "input.required" = $true
+            "resource.limit" = $true
+            "user.spam" = $true
         }
+        annoyed_threshold = 3
+        annoyed_window_seconds = 10
+        silent_window_seconds = 0
         pack_rotation = @()
-        tab_titles = $true
+        pack_rotation_mode = "random"
     } | ConvertTo-Json -Depth 3
     Set-Content -Path $configPath -Value $config
 }
@@ -173,6 +179,12 @@ param(
 if ($Command) {
     $InstallDir = Split-Path -Parent $MyInvocation.MyCommand.Path
     $ConfigPath = Join-Path $InstallDir "config.json"
+
+    # Ensure config exists
+    if (-not (Test-Path $ConfigPath)) {
+        Write-Host "Error: peon-ping not configured. Config not found at $ConfigPath" -ForegroundColor Red
+        exit 1
+    }
 
     switch -Regex ($Command) {
         "^--toggle$" {
@@ -200,9 +212,14 @@ if ($Command) {
             return
         }
         "^--status$" {
-            $cfg = Get-Content $ConfigPath -Raw | ConvertFrom-Json
-            $state = if ($cfg.enabled) { "ENABLED" } else { "PAUSED" }
-            Write-Host "peon-ping: $state | pack: $($cfg.active_pack) | volume: $($cfg.volume)" -ForegroundColor Cyan
+            try {
+                $cfg = Get-Content $ConfigPath -Raw | ConvertFrom-Json
+                $state = if ($cfg.enabled) { "ENABLED" } else { "PAUSED" }
+                Write-Host "peon-ping: $state | pack: $($cfg.active_pack) | volume: $($cfg.volume)" -ForegroundColor Cyan
+            } catch {
+                Write-Host "Error reading config: $_" -ForegroundColor Red
+                exit 1
+            }
             return
         }
         "^--packs$" {
@@ -312,22 +329,53 @@ try {
 
 # --- Map Claude Code hook event -> CESP manifest category ---
 $category = $null
+$ntype = $event.notification_type
+
 switch ($hookEvent) {
-    "SessionStart"      { $category = "session.start" }
-    "Stop"              { $category = "task.acknowledge" }
-    "Notification"      { $category = "task.complete" }
-    "PermissionRequest" { $category = "input.required" }
+    "SessionStart" {
+        $category = "session.start"
+    }
+    "Stop" {
+        $category = "task.complete"
+        # Debounce rapid Stop events (5s cooldown)
+        $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+        $lastStop = if ($state.ContainsKey("last_stop_time")) { $state["last_stop_time"] } else { 0 }
+        if (($now - $lastStop) -lt 5) {
+            $category = $null
+        }
+        $state["last_stop_time"] = $now
+    }
+    "Notification" {
+        if ($ntype -eq "permission_prompt") {
+            # PermissionRequest event handles the sound, skip here
+            $category = $null
+        } elseif ($ntype -eq "idle_prompt") {
+            # Stop event already played the sound
+            $category = $null
+        } else {
+            $category = $null
+        }
+    }
+    "PermissionRequest" {
+        $category = "input.required"
+    }
     "UserPromptSubmit" {
         # Detect rapid prompts for "annoyed" easter egg
+        $sessionId = if ($event.session_id) { $event.session_id } else { "default" }
         $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+        $annoyedThreshold = if ($config.annoyed_threshold) { $config.annoyed_threshold } else { 3 }
+        $annoyedWindow = if ($config.annoyed_window_seconds) { $config.annoyed_window_seconds } else { 10 }
+
+        $allPrompts = if ($state.ContainsKey("prompt_timestamps")) { $state["prompt_timestamps"] } else { @{} }
         $recentPrompts = @()
-        if ($state.ContainsKey("recent_prompts")) {
-            $recentPrompts = @($state["recent_prompts"] | Where-Object { ($now - $_) -lt 10 })
+        if ($allPrompts.ContainsKey($sessionId)) {
+            $recentPrompts = @($allPrompts[$sessionId] | Where-Object { ($now - $_) -lt $annoyedWindow })
         }
         $recentPrompts += $now
-        $state["recent_prompts"] = $recentPrompts
+        $allPrompts[$sessionId] = $recentPrompts
+        $state["prompt_timestamps"] = $allPrompts
 
-        if ($recentPrompts.Count -ge 3) {
+        if ($recentPrompts.Count -ge $annoyedThreshold) {
             $category = "user.spam"
         }
     }
@@ -340,22 +388,11 @@ try {
 
 if (-not $category) { exit 0 }
 
-# Check if category is enabled (map CESP -> config names)
-$configCatMap = @{
-    "session.start"    = "greeting"
-    "task.acknowledge"  = "acknowledge"
-    "task.complete"     = "complete"
-    "task.error"        = "error"
-    "input.required"    = "permission"
-    "user.spam"         = "annoyed"
-}
-$configCatName = $configCatMap[$category]
-if ($configCatName) {
-    try {
-        $catEnabled = $config.categories.$configCatName
-        if ($catEnabled -eq $false) { exit 0 }
-    } catch {}
-}
+# Check if category is enabled
+try {
+    $catEnabled = $config.categories.$category
+    if ($catEnabled -eq $false) { exit 0 }
+} catch {}
 
 # --- Pick a sound ---
 $activePack = $config.active_pack
@@ -403,42 +440,47 @@ try {
     $state | ConvertTo-Json -Depth 3 | Set-Content $StatePath
 } catch {}
 
-# --- Play the sound ---
+# --- Play the sound (async) ---
 $volume = $config.volume
 if (-not $volume) { $volume = 0.5 }
 
-try {
-    Add-Type -AssemblyName PresentationCore
-    $player = New-Object System.Windows.Media.MediaPlayer
-    $fullPath = (Resolve-Path $soundPath).Path
-    $player.Open([Uri]::new("file:///$($fullPath -replace '\\','/')"))
-    $player.Volume = $volume
-    Start-Sleep -Milliseconds 150
-    $player.Play()
-    # Wait for playback to start
-    $timeout = 50
-    while ($timeout -gt 0 -and $player.Position.TotalMilliseconds -eq 0) {
-        Start-Sleep -Milliseconds 100
-        $timeout--
-    }
-    if ($player.NaturalDuration.HasTimeSpan) {
-        $remaining = $player.NaturalDuration.TimeSpan.TotalMilliseconds - $player.Position.TotalMilliseconds
-        if ($remaining -gt 0 -and $remaining -lt 5000) {
-            Start-Sleep -Milliseconds ([int]$remaining + 100)
-        }
-    } else {
-        Start-Sleep -Seconds 2
-    }
-    $player.Close()
-} catch {
-    # Fallback: use SoundPlayer for WAV files
+# Use Start-Job for async playback to avoid blocking Claude Code
+$null = Start-Job -ArgumentList $soundPath, $volume -ScriptBlock {
+    param($path, $vol)
     try {
-        if ($soundPath -match "\.wav$") {
-            $sp = New-Object System.Media.SoundPlayer $soundPath
-            $sp.PlaySync()
-            $sp.Dispose()
+        Add-Type -AssemblyName PresentationCore
+        $player = New-Object System.Windows.Media.MediaPlayer
+        $fullPath = (Resolve-Path $path).Path
+        $player.Open([Uri]::new("file:///$($fullPath -replace '\\','/')"))
+        $player.Volume = $vol
+        Start-Sleep -Milliseconds 150
+        $player.Play()
+        # Wait for playback to start
+        $timeout = 50
+        while ($timeout -gt 0 -and $player.Position.TotalMilliseconds -eq 0) {
+            Start-Sleep -Milliseconds 100
+            $timeout--
         }
-    } catch {}
+        if ($player.NaturalDuration.HasTimeSpan) {
+            $remaining = $player.NaturalDuration.TimeSpan.TotalMilliseconds - $player.Position.TotalMilliseconds
+            if ($remaining -gt 0 -and $remaining -lt 5000) {
+                Start-Sleep -Milliseconds ([int]$remaining + 100)
+            }
+        } else {
+            Start-Sleep -Seconds 2
+        }
+        $player.Close()
+    } catch {
+        # Fallback: use SoundPlayer for WAV files (async)
+        try {
+            if ($path -match "\.wav$") {
+                $sp = New-Object System.Media.SoundPlayer $path
+                $sp.Play()  # Play() is async, PlaySync() blocks
+                Start-Sleep -Seconds 2
+                $sp.Dispose()
+            }
+        } catch {}
+    }
 }
 
 exit 0
@@ -527,6 +569,35 @@ foreach ($evt in $events) {
 
 $settings | ConvertTo-Json -Depth 10 | Set-Content $SettingsFile
 Write-Host "  Hooks registered for: $($events -join ', ')" -ForegroundColor Green
+
+# --- Install skills ---
+Write-Host ""
+Write-Host "Installing skills..."
+
+$skillsSourceDir = Join-Path $PSScriptRoot "skills"
+$skillsTargetDir = Join-Path $ClaudeDir "skills"
+
+if (Test-Path $skillsSourceDir) {
+    New-Item -ItemType Directory -Path $skillsTargetDir -Force | Out-Null
+
+    Get-ChildItem -Path $skillsSourceDir -Directory | ForEach-Object {
+        $skillName = $_.Name
+        $skillTarget = Join-Path $skillsTargetDir $skillName
+
+        # Remove old version if exists
+        if (Test-Path $skillTarget) {
+            Remove-Item -Path $skillTarget -Recurse -Force
+        }
+
+        # Copy skill
+        Copy-Item -Path $_.FullName -Destination $skillTarget -Recurse -Force
+        Write-Host "  /$skillName" -ForegroundColor DarkGray
+    }
+
+    Write-Host "  Skills installed" -ForegroundColor Green
+} else {
+    Write-Host "  Skills directory not found, skipping" -ForegroundColor Yellow
+}
 
 # --- Test sound ---
 Write-Host ""
