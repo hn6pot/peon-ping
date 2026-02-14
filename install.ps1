@@ -9,6 +9,10 @@ param(
     [switch]$All
 )
 
+# When run via Invoke-Expression (one-liner install), $PSScriptRoot is empty.
+# Fall back to current directory so Join-Path calls don't receive an empty string.
+$ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { $PWD.Path }
+
 $ErrorActionPreference = "Stop"
 
 Write-Host "=== peon-ping Windows installer ===" -ForegroundColor Cyan
@@ -181,7 +185,7 @@ if (-not $Updating) {
 $scriptsDir = Join-Path $InstallDir "scripts"
 New-Item -ItemType Directory -Path $scriptsDir -Force | Out-Null
 
-$winPlaySource = Join-Path $PSScriptRoot "scripts\win-play.ps1"
+$winPlaySource = Join-Path $ScriptDir "scripts\win-play.ps1"
 $winPlayTarget = Join-Path $scriptsDir "win-play.ps1"
 
 if (Test-Path $winPlaySource) {
@@ -609,7 +613,7 @@ Write-Host "  Hooks registered for: $($events -join ', ')" -ForegroundColor Gree
 Write-Host ""
 Write-Host "Installing skills..."
 
-$skillsSourceDir = Join-Path $PSScriptRoot "skills"
+$skillsSourceDir = Join-Path $ScriptDir "skills"
 $skillsTargetDir = Join-Path $ClaudeDir "skills"
 New-Item -ItemType Directory -Path $skillsTargetDir -Force | Out-Null
 
@@ -648,7 +652,7 @@ if (Test-Path $skillsSourceDir) {
 }
 
 # --- Install uninstall script ---
-$uninstallSource = Join-Path $PSScriptRoot "uninstall.ps1"
+$uninstallSource = Join-Path $ScriptDir "uninstall.ps1"
 $uninstallTarget = Join-Path $InstallDir "uninstall.ps1"
 
 if (Test-Path $uninstallSource) {
