@@ -2116,13 +2116,27 @@ else
   _run_sound_and_notify & disown
 fi
 
-# --- Trainer reminder sound (after main sound, with delay in production) ---
+# --- Trainer reminder sound (after main sound finishes) ---
 if [ -n "${TRAINER_SOUND:-}" ] && [ -f "$TRAINER_SOUND" ]; then
   if [ "${PEON_TEST:-0}" = "1" ]; then
     play_sound "$TRAINER_SOUND" "$VOLUME"
   else
     (
-      sleep 1
+      # Wait for the main pack sound to finish before playing trainer sound
+      _pidfile="$PEON_DIR/.sound.pid"
+      if [ -f "$_pidfile" ]; then
+        _main_pid=$(cat "$_pidfile" 2>/dev/null)
+        if [ -n "$_main_pid" ] && kill -0 "$_main_pid" 2>/dev/null; then
+          # Wait up to 10s for main sound to finish
+          _waited=0
+          while kill -0 "$_main_pid" 2>/dev/null && [ "$_waited" -lt 100 ]; do
+            sleep 0.1
+            _waited=$((_waited + 1))
+          done
+        fi
+      fi
+      # Brief pause after main sound ends for natural spacing
+      sleep 0.5
       play_sound "$TRAINER_SOUND" "$VOLUME"
       if [ -n "$NOTIFY" ] && [ "$PAUSED" != "true" ] && [ "${DESKTOP_NOTIF:-true}" = "true" ]; then
         if ! terminal_is_focused; then
