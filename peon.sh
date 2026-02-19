@@ -50,6 +50,10 @@ else
   CONFIG="$PEON_DIR/config.json"
 fi
 unset _local_config
+# Global config is always the install-level file; used by CLI commands that
+# manage user-wide settings (trainer, rotation, volume) so they persist
+# regardless of which project directory the user is in.
+GLOBAL_CONFIG="$PEON_DIR/config.json"
 STATE="$PEON_DIR/.state.json"
 
 # --- Resolve a bundled script from scripts/ (handles local + Homebrew/Cellar installs) ---
@@ -1614,7 +1618,7 @@ HELPEOF
       on)
         python3 -c "
 import json
-config_path = '$CONFIG'
+config_path = '$GLOBAL_CONFIG'
 try:
     cfg = json.load(open(config_path))
 except Exception:
@@ -1635,7 +1639,7 @@ json.dump(cfg, open(config_path, 'w'), indent=2)
       off)
         python3 -c "
 import json
-config_path = '$CONFIG'
+config_path = '$GLOBAL_CONFIG'
 try:
     cfg = json.load(open(config_path))
 except Exception:
@@ -1774,7 +1778,7 @@ print(f'  {bar}  {int(pct*100)}%')
         python3 -c "
 import json, sys
 
-config_path = '$CONFIG'
+config_path = '$GLOBAL_CONFIG'
 arg1 = '$ARG1'
 arg2 = '$ARG2'
 
