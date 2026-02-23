@@ -193,3 +193,64 @@ Apply the same changes in the appropriate language. If a section is added to `RE
 ## Website
 
 `docs/` contains the static landing page ([peonping.com](https://peonping.com)), deployed via Vercel. A `vercel.json` in `docs/` provides the `/install` redirect so `curl -fsSL peonping.com/install | bash` works. `video/` is a separate Remotion project for promotional videos (React + TypeScript, independent from the main codebase).
+
+## Fork-specific: Overlay Themes & iTerm2 Focus
+
+This fork adds overlay themes and iTerm2 multi-window/tab focus support. Development source files live in `~/WorkingLab/claude-setup/jarvis-notif/`. Installed overlays are at `~/.claude/hooks/peon-ping/scripts/`.
+
+### Overlay Architecture
+
+Overlay notifications are JXA (JavaScript for Automation) scripts that create native Cocoa windows via the ObjC bridge. The notification pipeline:
+
+1. `peon.sh` → `send_notification()` exports `PEON_BUNDLE_ID`, `PEON_IDE_PID`, `PEON_SESSION_TTY`
+2. `scripts/notify.sh` → `_resolve_overlay_theme()` reads `overlay_theme` from config.json, `_find_overlay()` resolves `mac-overlay-{theme}.js` with fallback to `mac-overlay.js`
+3. Overlay JS → receives argv[0..8]: message, color, icon_path, slot, dismiss_seconds, bundle_id, ide_pid, session_tty, subtitle
+
+### Overlay Theme Files
+
+| File | Style | Dimensions | Key features |
+|---|---|---|---|
+| `mac-overlay.js` | Default (upstream) | 500x80 | Solid color bar, icon support, NSButton click handler |
+| `mac-overlay-glass.js` | Glassmorphism | 380x160 | Accent bar, progress line, timestamp, subtitle |
+| `mac-overlay-jarvis.js` | HUD futuriste | 340x340 | Circular display, rotating arcs, graduation ticks, progress ring |
+| `mac-overlay-sakura.js` | Zen garden | 360x180 | Bonsai tree, animated cherry blossom petals, subtitle |
+
+Theme selection via config.json: `"overlay_theme": "jarvis"` (valid: jarvis, glass, sakura, or omit for default).
+
+### iTerm2 Tab/Window Focus
+
+When `PEON_SESSION_TTY` is set and `bundleId === 'com.googlecode.iterm2'`:
+- **`terminal_is_focused()`** compares the active iTerm2 session TTY against ours — returns 1 (not focused) if on a different tab
+- **Click handler** spawns an osascript JXA child that iterates `iTerm.windows() > tabs() > sessions()`, matches by TTY, then calls `ts[t].select()` + `ss[s].select()` + `AXRaise` on the window
+
+### JXA Gotchas (CRITICAL)
+
+**NEVER use 0.0 or 1.0 as RGB color components via CGColor:**
+```javascript
+// BROKEN — EXIT 137 (SIGKILL)
+cg(0, 0, 0, 0.99)
+cg(0.40, 0.60, 1.00, 1.0)
+
+// WORKS
+cg(0.01, 0.01, 0.01, 0.99)
+cg(0.40, 0.60, 0.99, 1.0)
+```
+This is a JXA ObjC bridge bug. Use `0.01`/`0.99` as bounds for sRGB RGB components when the result goes through `.CGColor`.
+
+**NEVER use .SFNSText font names:** `.SFNSText`, `.SFNSText-Bold` are private system fonts. JXA CoreText silently replaces them with Times New Roman. Use `HelveticaNeue`, `AvenirNext-Bold`, etc.
+
+**ObjC class names must be unique per process:** `ObjC.registerSubclass({ name: 'Foo' })` — each theme uses unique names: `PeonClickHandler`, `GlassDismissHandler`/`GlassAnimator`, `JarvisDismissHandler`/`JarvisAnimator`, `SakuraDismissHandler`/`SakuraAnimator`.
+
+**Use CGPathCreateWithRoundedRect for rounded rects:** Manual `CGPathAddArcToPoint` paths work for fill but have issues with stroke in JXA. Use `$.CGPathCreateWithRoundedRect($.CGRectMake(...), rx, ry, null)`.
+
+**iTerm2 tab selection API:** Use `ts[t].select()` and `ss[s].select()`. Property assignment APIs (`ws[w].currentTab = ts[t]`, `ts[t].currentSession = ss[s]`) fail with AppleEvent errors.
+
+### Testing Overlays Manually
+
+```bash
+# Test a themed overlay
+osascript -l JavaScript scripts/mac-overlay-jarvis.js "Task complete — myproject" "blue" "" "0" "5" "com.googlecode.iterm2" "0" "/dev/ttys000"
+
+# Test with subtitle (glass/sakura)
+osascript -l JavaScript scripts/mac-overlay-glass.js "Task complete" "green" "" "0" "5" "com.googlecode.iterm2" "0" "/dev/ttys000" "Using tool: Read file.ts"
+```
